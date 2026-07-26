@@ -2,7 +2,6 @@ package core
 
 import (
 	"fmt"
-	"time"
 )
 
 // ExampleAgent demonstrates how to create and use an Agent
@@ -11,17 +10,15 @@ func ExampleAgent() {
 	agent := Agent{
 		ID:        "example-agent",
 		Name:      "Example AI Agent",
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		CreatedAt: nil, // This would be set to time.Now() in real usage
+		UpdatedAt: nil, // This would be set to time.Now() in real usage
 	}
 
 	// Print agent information
 	fmt.Printf("Agent ID: %s\n", agent.ID)
 	fmt.Printf("Agent Name: %s\n", agent.Name)
-	fmt.Printf("Created at: %v\n", agent.CreatedAt)
 
 	// Output:
 	// Agent ID: example-agent
 	// Agent Name: Example AI Agent
-	// Created at: <current time>
 }

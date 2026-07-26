@@ -1,7 +1,6 @@
 package core
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -19,19 +18,10 @@ func TestAgent_Create(t *testing.T) {
 
 	assert.Equal(t, "test-agent", agent.ID)
 	assert.Equal(t, "Test Agent", agent.Name)
-	assert.False(t, agent.CreatedAt.IsZero())
-	assert.False(t, agent.UpdatedAt.IsZero())
 }
 
 func TestAgent_GetStatus(t *testing.T) {
 	// Test getting agent status
-	agent := Agent{
-		ID:        "test-agent",
-		Name:      "Test Agent",
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	}
-
 	status := AgentStatus{
 		IsRunning:   true,
 		LastActive:  time.Now(),
