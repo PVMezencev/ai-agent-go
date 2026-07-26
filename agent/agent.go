@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"time"
 
-	"ai-agent-go/agent/core"
-	"ai-agent-go/agent/llm"
-	"ai-agent-go/agent/filesystem"
-	"ai-agent-go/agent/database"
-	"ai-agent-go/agent/web"
+	"github.com/PVMezencev/ai-agent-go/agent/core"
+	"github.com/PVMezencev/ai-agent-go/agent/llm"
+	"github.com/PVMezencev/ai-agent-go/agent/filesystem"
+	"github.com/PVMezencev/ai-agent-go/agent/database"
+	"github.com/PVMezencev/ai-agent-go/agent/web"
 )
 
 // Agent represents the main AI agent that coordinates all modules
