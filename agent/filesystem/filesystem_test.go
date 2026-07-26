@@ -1,7 +1,7 @@
 package filesystem
 
 import (
-	"context"
+	"io/fs"
 	"testing"
 	"time"
 
@@ -31,6 +31,6 @@ func TestFileInfo_Create(t *testing.T) {
 
 	assert.Equal(t, "test.txt", fileInfo.Name)
 	assert.Equal(t, int64(1024), fileInfo.Size)
-	assert.Equal(t, 0644, fileInfo.Mode)
+	assert.Equal(t, fs.FileMode(0644), fileInfo.Mode)
 	assert.False(t, fileInfo.IsDir)
 }
