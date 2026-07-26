@@ -33,10 +33,11 @@ The agent follows a modular architecture with the following key components:
 3. **Extensible**: Easy to add new providers or implementations
 4. **Configurable**: All components can be configured via configuration structures
 5. **Testable**: Interfaces make it easy to mock components for testing
+6. **CLI Support**: Can be installed and used as a command-line tool
 
 ## Usage
 
-### Basic Agent Creation
+### As a Library
 
 ```go
 import "ai-agent-go/agent"
@@ -85,28 +86,35 @@ if err != nil {
 fmt.Println(result)
 ```
 
-### Module Usage
+### As a Command-Line Tool
 
-Each module can be used independently:
+Install the CLI tool:
 
-```go
-// LLM usage
-llmProvider, _ := llm.NewOpenAIProvider(llmConfig)
-response, err := llmProvider.ChatCompletion(ctx, chatRequest)
-
-// File system usage
-fs := filesystem.NewLocalFileSystem(fsConfig)
-content, err := fs.ReadFile(ctx, "data.txt")
-
-// Database usage
-db, _ := database.NewSQLiteDB(dbConfig)
-err = db.Connect(ctx)
-rows, err := db.Query(ctx, "SELECT * FROM users")
-
-// Web search usage
-webSearch, _ := web.NewWebSearch(webConfig)
-results, err := webSearch.Search(ctx, "Go programming", web.SearchOptions{})
+```bash
+go install github.com/yourusername/ai-agent-go
 ```
+
+Use the CLI tool:
+
+```bash
+# Basic usage
+ai-agent "Write a report about Go programming"
+
+# With specific tasks
+ai-agent "Summarize the benefits of Go programming language"
+ai-agent "Create a SQL query to find all users with email domain '@company.com'"
+```
+
+## CLI Features
+
+The command-line agent includes several safety features:
+
+1. **Error Handling**: Automatically handles and reports errors from agent operations
+2. **User Permission**: Requests user confirmation for potentially dangerous actions
+3. **Result Correction**: Uses LLM to correct or improve results when errors occur
+4. **Safety Checks**: Detects and warns about potentially dangerous commands
+5. **Retry Logic**: Automatically retries failed operations with exponential backoff
+6. **Loop Prevention**: Prevents infinite loops when errors occur repeatedly
 
 ## Configuration
 
@@ -114,6 +122,12 @@ The agent can be configured through:
 - Configuration files (JSON/YAML)
 - Environment variables
 - Constructor parameters
+
+For CLI usage, you can set environment variables:
+
+```bash
+export OPENAI_API_KEY="your-api-key-here"
+```
 
 ## Extending the Agent
 
