@@ -40,7 +40,7 @@
 ### Как библиотека
 
 ```go
-import "ai-agent-go/agent"
+import "github.com/PVMezencev/ai-agent-go/agent"
 
 // Создание конфигурации
 config := agent.AgentConfig{
@@ -91,7 +91,7 @@ fmt.Println(result)
 Установка CLI инструмента:
 
 ```bash
-go install github.com/yourusername/ai-agent-go
+go install github.com/PVMezencev/ai-agent-go
 ```
 
 Использование CLI инструмента:
