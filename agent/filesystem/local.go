@@ -2,11 +2,10 @@ package filesystem
 
 import (
 	"context"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"time"
+	"strings"
 )
 
 // LocalFileSystem implements the FileSystemInterface for local file system operations
@@ -172,6 +171,3 @@ func isPathWithinBasePath(basePath, fullPath string) bool {
 	}
 	return !strings.HasPrefix(rel, "..")
 }
-
-// Import for strings package
-import "strings"

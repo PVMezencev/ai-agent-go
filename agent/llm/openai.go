@@ -8,13 +8,11 @@ import (
 // OpenAIProvider implements the LLMProvider interface for OpenAI
 type OpenAIProvider struct {
 	config LLMConfig
-	client *openai.Client
 }
 
 // NewOpenAIProvider creates a new OpenAI provider instance
 func NewOpenAIProvider(config LLMConfig) (*OpenAIProvider, error) {
-	// In a real implementation, this would initialize the OpenAI client
-	// For this example, we'll just store the config
+	// For this example implementation, we'll just store the config
 	return &OpenAIProvider{
 		config: config,
 	}, nil

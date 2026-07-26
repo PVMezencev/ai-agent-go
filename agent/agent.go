@@ -80,7 +80,11 @@ func (a *Agent) initModules() error {
 	}
 
 	// Initialize web search
-	a.WebSearch = web.NewWebSearch(a.config.WebConfig)
+	webSearch, err := web.NewWebSearch(a.config.WebConfig)
+	if err != nil {
+		return err
+	}
+	a.WebSearch = webSearch
 
 	return nil
 }
