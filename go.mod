@@ -1,4 +1,4 @@
-module ai-agent-go
+module github.com/PVMezencev/ai-agent-go
 
 go 1.21
 
