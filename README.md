@@ -1,48 +1,48 @@
-# AI Agent Module for Go
+# Модуль AI агента для Go
 
-This is a modular AI agent implementation for Go applications, designed to provide a flexible and extensible foundation for building AI-powered applications.
+Это модульный AI агент для приложений на Go, разработанный для предоставления гибкой и расширяемой основы для создания приложений с искусственным интеллектом.
 
-## Architecture
+## Архитектура
 
-The agent follows a modular architecture with the following key components:
+Агент следует модульной архитектуре с следующими ключевыми компонентами:
 
-### Core Package
-- `core/agent.go`: Main agent structure and interfaces
-- Defines the core agent functionality and interfaces
+### Core Пакет
+- `core/agent.go`: Основная структура агента и интерфейсы
+- Определяет основную функциональность агента и интерфейсы
 
-### LLM Package
-- `llm/llm.go`: LLM provider interfaces and data structures
-- `llm/openai.go`: OpenAI API implementation
+### LLM Пакет
+- `llm/llm.go`: Интерфейсы провайдеров LLM и структуры данных
+- `llm/openai.go`: Реализация OpenAI API
 
-### Filesystem Package
-- `filesystem/filesystem.go`: File system interfaces
-- `filesystem/local.go`: Local file system implementation
+### Filesystem Пакет
+- `filesystem/filesystem.go`: Интерфейсы работы с файловой системой
+- `filesystem/local.go`: Реализация локальной файловой системы
 
-### Database Package
-- `database/database.go`: Database interfaces and data structures
-- `database/sqlite.go`: SQLite database implementation
+### Database Пакет
+- `database/database.go`: Интерфейсы работы с базой данных и структуры данных
+- `database/sqlite.go`: Реализация SQLite базы данных
 
-### Web Package
-- `web/web.go`: Web search and scraping interfaces
-- `web/search.go`: Web search implementation
+### Web Пакет
+- `web/web.go`: Интерфейсы веб-поиска и скрапинга
+- `web/search.go`: Реализация веб-поиска
 
-## Features
+## Возможности
 
-1. **Modular Design**: Each component is a separate package with clear interfaces
-2. **SOLID Principles**: Follows SOLID design principles with interface-based design
-3. **Extensible**: Easy to add new providers or implementations
-4. **Configurable**: All components can be configured via configuration structures
-5. **Testable**: Interfaces make it easy to mock components for testing
-6. **CLI Support**: Can be installed and used as a command-line tool
+1. **Модульная архитектура**: Каждый компонент является отдельным пакетом с четко определенными интерфейсами
+2. **Принципы SOLID**: Следует принципам SOLID с интерфейсным дизайном
+3. **Расширяемость**: Легко добавлять новые провайдеры или реализации
+4. **Конфигурируемость**: Все компоненты могут быть настроены через структуры конфигурации
+5. **Тестируемость**: Интерфейсы делают простым мокирование компонентов для тестирования
+6. **Поддержка CLI**: Может быть установлен и использован как командная строка
 
-## Usage
+## Использование
 
-### As a Library
+### Как библиотека
 
 ```go
 import "ai-agent-go/agent"
 
-// Create configuration
+// Создание конфигурации
 config := agent.AgentConfig{
     AgentConfig: core.AgentConfig{
         ID: "my-agent",
@@ -64,20 +64,20 @@ config := agent.AgentConfig{
     },
 }
 
-// Create agent
+// Создание агента
 agent, err := agent.NewAgent(config)
 if err != nil {
     log.Fatal(err)
 }
 
-// Start agent
+// Запуск агента
 ctx := context.Background()
 err = agent.Start(ctx)
 if err != nil {
     log.Fatal(err)
 }
 
-// Execute a task
+// Выполнение задачи
 result, err := agent.Execute(ctx, "Hello, world!")
 if err != nil {
     log.Fatal(err)
@@ -86,63 +86,63 @@ if err != nil {
 fmt.Println(result)
 ```
 
-### As a Command-Line Tool
+### Как командная строка
 
-Install the CLI tool:
+Установка CLI инструмента:
 
 ```bash
 go install github.com/yourusername/ai-agent-go
 ```
 
-Use the CLI tool:
+Использование CLI инструмента:
 
 ```bash
-# Basic usage
-ai-agent "Write a report about Go programming"
+# Базовое использование
+ai-agent "Написать отчет о Go программировании"
 
-# With specific tasks
-ai-agent "Summarize the benefits of Go programming language"
-ai-agent "Create a SQL query to find all users with email domain '@company.com'"
+# Специфические задачи
+ai-agent "Суммировать преимущества языка Go"
+ai-agent "Создать SQL запрос для поиска всех пользователей с доменом email '@company.com'"
 ```
 
-## CLI Features
+## Возможности CLI
 
-The command-line agent includes several safety features:
+Командный агент включает несколько функций безопасности:
 
-1. **Error Handling**: Automatically handles and reports errors from agent operations
-2. **User Permission**: Requests user confirmation for potentially dangerous actions
-3. **Result Correction**: Uses LLM to correct or improve results when errors occur
-4. **Safety Checks**: Detects and warns about potentially dangerous commands
-5. **Retry Logic**: Automatically retries failed operations with exponential backoff
-6. **Loop Prevention**: Prevents infinite loops when errors occur repeatedly
+1. **Обработка ошибок**: Автоматическая обработка и отчет об ошибках операций агента
+2. **Разрешение пользователя**: Запрашивает разрешение пользователя для потенциально опасных действий
+3. **Коррекция результатов**: Использует LLM для коррекции или улучшения результатов при возникновении ошибок
+4. **Проверки безопасности**: Обнаруживает и предупреждает о потенциально опасных командах
+5. **Логика повтора**: Автоматически повторяет неудачные операции с экспоненциальной задержкой
+6. **Предотвращение зацикливания**: Предотвращает бесконечные циклы при повторяющихся ошибках
 
-## Configuration
+## Конфигурация
 
-The agent can be configured through:
-- Configuration files (JSON/YAML)
-- Environment variables
-- Constructor parameters
+Агент может быть сконфигурирован через:
+- Файлы конфигурации (JSON/YAML)
+- Переменные окружения
+- Параметры конструктора
 
-For CLI usage, you can set environment variables:
+Для использования CLI можно установить переменные окружения:
 
 ```bash
-export OPENAI_API_KEY="your-api-key-here"
+export OPENAI_API_KEY="ваш-ключ-api-здесь"
 ```
 
-## Extending the Agent
+## Расширение агента
 
-To extend the agent with new functionality:
+Чтобы расширить агент новой функциональностью:
 
-1. Create a new package in the `agent/` directory
-2. Define interfaces for your new functionality
-3. Implement the interfaces with concrete types
-4. Add the new module to the agent initialization
-5. Update the agent's Execute method to use the new functionality
+1. Создайте новый пакет в директории `agent/`
+2. Определите интерфейсы для новой функциональности
+3. Реализуйте интерфейсы с конкретными типами
+4. Добавьте новый модуль в инициализацию агента
+5. Обновите метод Execute агента для использования новой функциональности
 
-## Testing
+## Тестирование
 
-All interfaces are designed to be easily mockable for testing purposes. You can create mock implementations for testing without requiring actual external services.
+Все интерфейсы спроектированы для простого мокирования в целях тестирования. Можно создать мок-реализации для тестирования без необходимости использовать реальные внешние сервисы.
 
-## License
+## Лицензия
 
 MIT
