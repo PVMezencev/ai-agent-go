@@ -1,147 +1,228 @@
-# Модуль AI агента для Go
+# AI Agent Go
 
-Это модульный AI агент для приложений на Go, разработанный для предоставления гибкой и расширяемой основы для создания приложений с искусственным интеллектом.
+Модульный AI-агент на Go с поддержкой инструментов (tools), streaming и реальной оркестрации через LLM.
 
 ## Архитектура
 
-Агент следует модульной архитектуре с следующими ключевыми компонентами:
+```
+agent/
+├── core/          # Базовая структура агента, интерфейсы, конфиги
+├── llm/           # LLM-провайдеры (OpenAI) с HTTP, streaming и tool calling
+├── filesystem/    # Работа с файловой системой (чтение, запись, список)
+├── database/      # SQLite-база данных (запросы, транзакции)
+├── web/           # Веб-поиск и скрапинг страниц
+└── tools/         # Система инструментов — мост между модулями и LLM
+```
 
-### Core Пакет
-- `core/agent.go`: Основная структура агента и интерфейсы
-- Определяет основную функциональность агента и интерфейсы
+### Пакеты
 
-### LLM Пакет
-- `llm/llm.go`: Интерфейсы провайдеров LLM и структуры данных
-- `llm/openai.go`: Реализация OpenAI API
-
-### Filesystem Пакет
-- `filesystem/filesystem.go`: Интерфейсы работы с файловой системой
-- `filesystem/local.go`: Реализация локальной файловой системы
-
-### Database Пакет
-- `database/database.go`: Интерфейсы работы с базой данных и структуры данных
-- `database/sqlite.go`: Реализация SQLite базы данных
-
-### Web Пакет
-- `web/web.go`: Интерфейсы веб-поиска и скрапинга
-- `web/search.go`: Реализация веб-поиска
+| Пакет | Описание |
+|-------|----------|
+| `core` | Базовая структура `Agent`, `AgentInterface`, `AgentConfig`, `AgentStatus` |
+| `llm` | Интерфейс `LLMProvider`, реализация `OpenAIProvider` с реальным HTTP, streaming (SSE) и function calling |
+| `filesystem` | Интерфейс `FileSystemInterface`, реализация `LocalFileSystem` с защитой от выхода за `BasePath` |
+| `database` | Интерфейс `DatabaseInterface`, реализация `SQLiteDB` с пулом соединений и транзакциями |
+| `web` | Интерфейс `WebSearchInterface`, реализация `WebSearch` для поиска и скрапинга |
+| `tools` | Система инструментов: `Tool`, `Registry`, `ToolFunc` и билдеры для каждого модуля |
 
 ## Возможности
 
-1. **Модульная архитектура**: Каждый компонент является отдельным пакетом с четко определенными интерфейсами
-2. **Принципы SOLID**: Следует принципам SOLID с интерфейсным дизайном
-3. **Расширяемость**: Легко добавлять новые провайдеры или реализации
-4. **Конфигурируемость**: Все компоненты могут быть настроены через структуры конфигурации
-5. **Тестируемость**: Интерфейсы делают простым мокирование компонентов для тестирования
-6. **Поддержка CLI**: Может быть установлен и использован как командная строка
+1. **Реальная интеграция с OpenAI** — HTTP-запросы к API с ретриями (5xx, 429) и экспоненциальной задержкой
+2. **Tool Calling (Function Calling)** — LLM решает, какие инструменты вызвать; агент выполняет и возвращает результаты в цикл
+3. **Streaming** — SSE-потоковый вывод ответов в CLI для мгновенной обратной связи
+4. **Безопасность** — деструктивные операции (`delete_file`, `exec_sql`, `write_file`) требуют подтверждения пользователя
+5. **Модульная архитектура** — каждый компонент закреплён на интерфейсе, легко мокать и заменять
+6. **Расширяемость** — добавление нового инструмента — одна функция через `tools.NewToolFunc`
 
-## Использование
+## Установка
+
+```bash
+go install github.com/PVMezencev/ai-agent-go@latest
+```
+
+## Быстрый старт
+
+### CLI
+
+```bash
+export OPENAI_API_KEY="sk-..."
+
+# Базовый запрос
+ai-agent "Напиши краткий обзор goroutines в Go"
+
+# С инструментами
+ai-agent "Прочитай файл go.mod и объясни зависимости"
+ai-agent "Поискай в интернете последнюю версию Go"
+```
+
+### Переменные окружения
+
+| Переменная | Описание | По умолчанию |
+|------------|----------|-------------|
+| `OPENAI_API_KEY` | API-ключ OpenAI (обязательно) | — |
+| `OPENAI_MODEL` | Модель для использования | `gpt-4o` |
+| `OPENAI_ENDPOINT` | Кастомный API-эндпоинт | `https://api.openai.com` |
 
 ### Как библиотека
 
 ```go
-import "github.com/PVMezencev/ai-agent-go/agent"
+package main
 
-// Создание конфигурации
-config := agent.AgentConfig{
-    AgentConfig: core.AgentConfig{
-        ID: "my-agent",
-        Name: "My AI Agent",
-        Enabled: true,
-    },
-    LLMConfig: llm.LLMConfig{
-        APIKey: "your-openai-api-key",
-        Model: "gpt-4",
-    },
-    FileSystemConfig: filesystem.FileSystemConfig{
-        BasePath: "/path/to/data",
-    },
-    DatabaseConfig: database.DatabaseConfig{
-        DSN: "file:mydb.sqlite?cache=shared",
-    },
-    WebConfig: web.WebConfig{
-        Timeout: 30 * time.Second,
-    },
+import (
+    "context"
+    "fmt"
+    "log"
+    "time"
+
+    "github.com/PVMezencev/ai-agent-go/agent"
+    "github.com/PVMezencev/ai-agent-go/agent/core"
+    "github.com/PVMezencev/ai-agent-go/agent/llm"
+    "github.com/PVMezencev/ai-agent-go/agent/filesystem"
+    "github.com/PVMezencev/ai-agent-go/agent/database"
+    "github.com/PVMezencev/ai-agent-go/agent/web"
+)
+
+func main() {
+    config := agent.AgentConfig{
+        AgentConfig: core.AgentConfig{
+            ID:       "my-agent",
+            Name:     "My AI Agent",
+            Enabled:  true,
+            Timeout:  120 * time.Second,
+        },
+        LLMConfig: llm.LLMConfig{
+            APIKey:     "sk-...",
+            Model:      "gpt-4o",
+            Timeout:    120 * time.Second,
+            MaxRetries: 3,
+        },
+        FileSystemConfig: filesystem.FileSystemConfig{
+            BasePath: "/data",
+            Timeout:  10 * time.Second,
+        },
+        DatabaseConfig: database.DatabaseConfig{
+            DSN:             "file:app.db?cache=shared",
+            MaxOpenConns:    10,
+            MaxIdleConns:    5,
+            ConnMaxLifetime: 5 * time.Minute,
+            Timeout:         10 * time.Second,
+        },
+        WebConfig: web.WebConfig{
+            Timeout:   30 * time.Second,
+            MaxRetries: 3,
+            UserAgent: "MyAgent/1.0",
+        },
+        MaxToolRounds: 10,
+    }
+
+    a, err := agent.NewAgent(config)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    ctx := context.Background()
+    if err := a.Start(ctx); err != nil {
+        log.Fatal(err)
+    }
+    defer a.Stop(ctx)
+
+    // Execute — отправляет задачу в LLM с tools,
+    // обрабатывает tool calls и возвращает финальный ответ
+    result, err := a.Execute(ctx, "Найди информацию о Go 1.24 и сохрани в файл news.md")
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Println(result)
+
+    // Streaming — вывод ответа по мере генерации
+    err = a.ExecuteStream(ctx, "Расскажи о паттернах concurrency в Go", func(chunk llm.ChatStreamChunk) error {
+        fmt.Print(chunk.Content)
+        return nil
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
 }
-
-// Создание агента
-agent, err := agent.NewAgent(config)
-if err != nil {
-    log.Fatal(err)
-}
-
-// Запуск агента
-ctx := context.Background()
-err = agent.Start(ctx)
-if err != nil {
-    log.Fatal(err)
-}
-
-// Выполнение задачи
-result, err := agent.Execute(ctx, "Hello, world!")
-if err != nil {
-    log.Fatal(err)
-}
-
-fmt.Println(result)
 ```
 
-### Как командная строка
+## Доступные инструменты
 
-Установка CLI инструмента:
+Агент автоматически регистрирует инструменты из доступных модулей:
 
-```bash
-go install github.com/PVMezencev/ai-agent-go
+| Инструмент | Модуль | Описание | Безопасность |
+|------------|--------|----------|-------------|
+| `read_file` | filesystem | Чтение содержимого файла | — |
+| `write_file` | filesystem | Запись содержимого в файл | Требует подтверждения |
+| `list_files` | filesystem | Список файлов в директории | — |
+| `delete_file` | filesystem | Удаление файла | Требует подтверждения |
+| `create_directory` | filesystem | Создание директории | — |
+| `query_sql` | database | Выполнение SELECT-запросов | — |
+| `exec_sql` | database | Выполнение SQL-операций (INSERT/UPDATE/DELETE) | Требует подтверждения |
+| `web_search` | web | Поиск в интернете | — |
+| `scrape_url` | web | Скрапинг веб-страницы | — |
+
+## Как работает оркестрация
+
+```
+Пользователь → Execute(task)
+                    ↓
+           [LLM + tools definitions]
+                    ↓
+           LLM решает: ответ или tool call?
+                    ↓
+        ┌───────────┴───────────┐
+        │                        │
+    Текст ответа            Tool Call(s)
+        │                        ↓
+        │                 Выполнение инструментов
+        │                        ↓
+        │                 Результат → conversation
+        │                        ↓
+        │                 Снова к LLM (round + 1)
+        │                        ↓
+        └───────────←───────────┘
+                    ↓
+           Результат пользователю
 ```
 
-Использование CLI инструмента:
+Цикл повторяется до `MaxToolRounds` (по умолчанию 10) или пока LLM не вернёт текстовый ответ без tool calls.
 
-```bash
-# Базовое использование
-ai-agent "Написать отчет о Go программировании"
+## Добавление нового инструмента
 
-# Специфические задачи
-ai-agent "Суммировать преимущества языка Go"
-ai-agent "Создать SQL запрос для поиска всех пользователей с доменом email '@company.com'"
+```go
+import "github.com/PVMezencev/ai-agent-go/agent/tools"
+
+registry := tools.NewRegistry()
+
+registry.Register(tools.NewToolFunc(
+    "calculate",
+    "Perform a mathematical calculation",
+    map[string]interface{}{
+        "type":       "object",
+        "properties": map[string]interface{}{
+            "expression": map[string]interface{}{
+                "type":        "string",
+                "description": "Math expression to evaluate",
+            },
+        },
+        "required": []string{"expression"},
+    },
+    func(ctx context.Context, argsJSON string) (string, error) {
+        args, _ := tools.ParseToolArgs(argsJSON)
+        expr := args["expression"].(string)
+        // evaluate...
+        return fmt.Sprintf("Result: %s", expr), nil
+    },
+))
 ```
-
-## Возможности CLI
-
-Командный агент включает несколько функций безопасности:
-
-1. **Обработка ошибок**: Автоматическая обработка и отчет об ошибках операций агента
-2. **Разрешение пользователя**: Запрашивает разрешение пользователя для потенциально опасных действий
-3. **Коррекция результатов**: Использует LLM для коррекции или улучшения результатов при возникновении ошибок
-4. **Проверки безопасности**: Обнаруживает и предупреждает о потенциально опасных командах
-5. **Логика повтора**: Автоматически повторяет неудачные операции с экспоненциальной задержкой
-6. **Предотвращение зацикливания**: Предотвращает бесконечные циклы при повторяющихся ошибках
-
-## Конфигурация
-
-Агент может быть сконфигурирован через:
-- Файлы конфигурации (JSON/YAML)
-- Переменные окружения
-- Параметры конструктора
-
-Для использования CLI можно установить переменные окружения:
-
-```bash
-export OPENAI_API_KEY="ваш-ключ-api-здесь"
-```
-
-## Расширение агента
-
-Чтобы расширить агент новой функциональностью:
-
-1. Создайте новый пакет в директории `agent/`
-2. Определите интерфейсы для новой функциональности
-3. Реализуйте интерфейсы с конкретными типами
-4. Добавьте новый модуль в инициализацию агента
-5. Обновите метод Execute агента для использования новой функциональности
 
 ## Тестирование
 
-Все интерфейсы спроектированы для простого мокирования в целях тестирования. Можно создать мок-реализации для тестирования без необходимости использовать реальные внешние сервисы.
+```bash
+go test ./...
+```
+
+Все интерфейсы спроектированы для простого мокирования. Модули можно заменить на тестовые реализации без подключения к внешним сервисам.
 
 ## Лицензия
 
