@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"log"
@@ -10,9 +11,10 @@ import (
 
 	"github.com/PVMezencev/ai-agent-go/agent"
 	"github.com/PVMezencev/ai-agent-go/agent/core"
-	"github.com/PVMezencev/ai-agent-go/agent/llm"
-	"github.com/PVMezencev/ai-agent-go/agent/filesystem"
 	"github.com/PVMezencev/ai-agent-go/agent/database"
+	"github.com/PVMezencev/ai-agent-go/agent/filesystem"
+	"github.com/PVMezencev/ai-agent-go/agent/llm"
+	"github.com/PVMezencev/ai-agent-go/agent/tools"
 	"github.com/PVMezencev/ai-agent-go/agent/web"
 )
 
@@ -25,26 +27,16 @@ type CLIConfig struct {
 	WebConfig      web.WebConfig
 	MaxRetries     int
 	Timeout        time.Duration
-	MaxLoopCount   int // Maximum number of loop iterations to prevent infinite loops
+	MaxLoopCount   int
 }
 
 func main() {
-	// Parse command line arguments
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: ai-agent <task>")
-		fmt.Println("Example: ai-agent \"Write a report about Go programming\"")
-		fmt.Println("")
-		fmt.Println("Features:")
-		fmt.Println("- Automatic error handling and retry logic")
-		fmt.Println("- User confirmation for potentially dangerous actions")
-		fmt.Println("- LLM-based result correction when needed")
-		fmt.Println("- Loop prevention to avoid infinite execution")
+		printUsage()
 		return
 	}
 
 	task := strings.Join(os.Args[1:], " ")
-
-	// Create default configuration
 	config := createDefaultConfig()
 
 	// Initialize the agent
@@ -64,18 +56,45 @@ func main() {
 		}
 	}()
 
-	// Execute the task with safety checks
-	result, err := executeTaskWithSafety(agentInstance, task, config)
-	if err != nil {
+	// Execute with streaming and safety
+	if err := executeWithStreaming(agentInstance, task, config); err != nil {
 		log.Fatalf("Task execution failed: %v", err)
 	}
-
-	fmt.Println("Result:")
-	fmt.Println(result)
 }
 
-// createDefaultConfig creates a default configuration for the CLI agent
+func printUsage() {
+	fmt.Println("Usage: ai-agent <task>")
+	fmt.Println()
+	fmt.Println("AI Agent CLI — execute tasks with LLM-powered reasoning and tools.")
+	fmt.Println()
+	fmt.Println("Available tools:")
+	fmt.Println("  - read_file     Read file contents")
+	fmt.Println("  - write_file    Write content to a file")
+	fmt.Println("  - list_files    List directory contents")
+	fmt.Println("  - delete_file   Delete a file (requires confirmation)")
+	fmt.Println("  - create_directory  Create a new directory")
+	fmt.Println("  - query_sql     Execute SQL SELECT queries")
+	fmt.Println("  - exec_sql      Execute SQL statements (requires confirmation)")
+	fmt.Println("  - web_search    Search the web")
+	fmt.Println("  - scrape_url    Scrape a web page")
+	fmt.Println()
+	fmt.Println("Environment:")
+	fmt.Println("  OPENAI_API_KEY  Your OpenAI API key (required)")
+	fmt.Println("  OPENAI_MODEL    Model to use (default: gpt-4o)")
+	fmt.Println("  OPENAI_ENDPOINT Custom API endpoint (optional)")
+	fmt.Println()
+	fmt.Println("Examples:")
+	fmt.Println("  ai-agent \"Summarize the contents of README.md\"")
+	fmt.Println("  ai-agent \"Search for the latest Go best practices\"")
+	fmt.Println("  ai-agent \"Create a SQL query to find active users\"")
+}
+
 func createDefaultConfig() CLIConfig {
+	model := os.Getenv("OPENAI_MODEL")
+	if model == "" {
+		model = "gpt-4o"
+	}
+
 	return CLIConfig{
 		AgentConfig: agent.AgentConfig{
 			AgentConfig: core.AgentConfig{
@@ -83,25 +102,27 @@ func createDefaultConfig() CLIConfig {
 				Name:        "CLI AI Agent",
 				Enabled:     true,
 				MaxRetries:  3,
-				Timeout:     30 * time.Second,
+				Timeout:     120 * time.Second,
 			},
+			MaxToolRounds: 10,
 		},
 		LLMConfig: llm.LLMConfig{
 			APIKey:      os.Getenv("OPENAI_API_KEY"),
-			Model:       "gpt-4",
-			Timeout:     30 * time.Second,
+			APIEndpoint: os.Getenv("OPENAI_ENDPOINT"),
+			Model:       model,
+			Timeout:     120 * time.Second,
 			MaxRetries:  3,
 		},
 		FileSystemConfig: filesystem.FileSystemConfig{
-			BasePath: "/tmp",
+			BasePath: ".",
 			Timeout:  10 * time.Second,
 		},
 		DatabaseConfig: database.DatabaseConfig{
-			DSN:           "file:cli-agent.db?cache=shared",
-			MaxOpenConns:  10,
-			MaxIdleConns:  5,
+			DSN:             "file:cli-agent.db?cache=shared",
+			MaxOpenConns:    10,
+			MaxIdleConns:    5,
 			ConnMaxLifetime: 5 * time.Minute,
-			Timeout:       10 * time.Second,
+			Timeout:         10 * time.Second,
 		},
 		WebConfig: web.WebConfig{
 			Timeout:      30 * time.Second,
@@ -110,123 +131,91 @@ func createDefaultConfig() CLIConfig {
 			AllowBlocked: false,
 		},
 		MaxRetries:   3,
-		Timeout:      30 * time.Second,
-		MaxLoopCount: 10, // Prevent more than 10 execution loops
+		Timeout:      120 * time.Second,
+		MaxLoopCount: 10,
 	}
 }
 
-// executeTaskWithSafety executes a task with safety checks and error handling
-func executeTaskWithSafety(a *agent.Agent, task string, config CLIConfig) (string, error) {
-	ctx := context.Background()
+func executeWithStreaming(a *agent.Agent, task string, config CLIConfig) error {
+	// Build a safety-aware tool registry that wraps destructive tools
+	safeRegistry := wrapToolsWithSafety(a.ToolRegistry)
+	a.ToolRegistry = safeRegistry
 
-	// Loop counter to prevent infinite execution
 	loopCount := 0
+	var lastErr error
 
-	// Safety check: Verify that the task is not potentially dangerous
-	if isDangerousTask(task) {
-		fmt.Printf("Warning: The task '%s' might be dangerous.\n", task)
-		fmt.Print("Do you want to proceed? (y/N): ")
-		var response string
-		fmt.Scanln(&response)
-		if response != "y" && response != "Y" {
-			return "", fmt.Errorf("task execution cancelled by user")
-		}
-	}
-
-	// Main execution loop with safety checks
 	for attempt := 0; attempt <= config.MaxRetries; attempt++ {
-		// Prevent infinite loops
 		loopCount++
 		if loopCount > config.MaxLoopCount {
-			return "", fmt.Errorf("maximum loop count (%d) exceeded - possible infinite loop detected", config.MaxLoopCount)
+			return fmt.Errorf("maximum loop count (%d) exceeded — possible infinite loop", config.MaxLoopCount)
 		}
 
-		fmt.Printf("Executing task (attempt %d/%d, loop %d/%d): %s\n",
-			attempt+1, config.MaxRetries+1, loopCount, config.MaxLoopCount, task)
+		fmt.Print("\rThinking...")
 
-		result, err := a.Execute(ctx, task)
-		if err == nil {
-			// Check if the result needs correction by LLM
-			correctedResult, correctionErr := correctResultWithLLM(a, task, result, config)
-			if correctionErr == nil {
-				return correctedResult, nil
-			} else {
-				fmt.Printf("Warning: Failed to correct result with LLM: %v\n", correctionErr)
-				return result, nil // Return original result if correction fails
+		// Stream the result
+		err := a.ExecuteStream(context.Background(), task, func(chunk llm.ChatStreamChunk) error {
+			// Print each chunk immediately
+			if chunk.Content != "" {
+				fmt.Print(chunk.Content)
 			}
-		}
+			return nil
+		})
 
-		if attempt < config.MaxRetries {
-			fmt.Printf("Attempt %d failed: %v. Retrying...\n", attempt+1, err)
-			time.Sleep(time.Duration(attempt+1) * time.Second) // Exponential backoff
+		if err != nil {
+			lastErr = err
+			fmt.Printf("\n\rAttempt %d failed: %v. Retrying...\n", attempt+1, err)
+			time.Sleep(time.Duration(attempt+1) * time.Second)
+			continue
+		} else {
+			fmt.Println() // Newline after streaming
+			return nil
 		}
 	}
 
-	return "", fmt.Errorf("task failed after %d attempts", config.MaxRetries+1)
+	fmt.Println()
+	return fmt.Errorf("task failed after %d attempts: %v", config.MaxRetries+1, lastErr)
 }
 
-// isDangerousTask checks if a task might be dangerous
-func isDangerousTask(task string) bool {
-	dangerousKeywords := []string{
-		"delete", "remove", "format", "erase", "remove",
-		"system", "shell", "exec", "run", "command",
-		"download", "install", "uninstall", "modify", "change",
-		"write", "save", "create", "update", "destroy",
-		"grant", "revoke", "delete", "remove",
+// wrapToolsWithSafety wraps the tool registry to add confirmation for destructive operations
+func wrapToolsWithSafety(original *tools.Registry) *tools.Registry {
+	safe := tools.NewRegistry()
+
+	destructiveTools := map[string]bool{
+		"delete_file": true,
+		"exec_sql":    true,
+		"write_file":  true,
 	}
 
-	taskLower := strings.ToLower(task)
-	for _, keyword := range dangerousKeywords {
-		if strings.Contains(taskLower, keyword) {
-			return true
+	for _, t := range original.All() {
+		if destructiveTools[t.Name()] {
+			// Wrap with confirmation
+			originalTool := t
+			wrapped := tools.NewToolFunc(
+				originalTool.Name(),
+				originalTool.Description()+ " Requires user confirmation before execution.",
+				originalTool.Parameters(),
+				func(ctx context.Context, argsJSON string) (string, error) {
+					// Prompt for confirmation
+					fmt.Printf("\n[SAFETY] Tool '%s' is about to be executed. This is a potentially destructive operation.\n", originalTool.Name())
+					fmt.Print("Confirm? (y/N): ")
+
+					scanner := bufio.NewScanner(os.Stdin)
+					if scanner.Scan() {
+						response := strings.ToLower(strings.TrimSpace(scanner.Text()))
+						if response != "y" && response != "yes" {
+							return "", fmt.Errorf("operation cancelled by user")
+						}
+					}
+					fmt.Println()
+
+					return originalTool.Execute(ctx, argsJSON)
+				},
+			)
+			safe.Register(wrapped)
+		} else {
+			safe.Register(t)
 		}
 	}
-	return false
-}
 
-// correctResultWithLLM uses LLM to correct or validate the result
-func correctResultWithLLM(a *agent.Agent, task, result string, config CLIConfig) (string, error) {
-	// Check if we have an LLM provider available
-	if a.LLMProvider == nil {
-		return result, nil // No LLM available, return original result
-	}
-
-	// Create correction prompt
-	correctionPrompt := fmt.Sprintf(`
-You are an AI assistant reviewing the output of another AI agent.
-Please review the following task and result and provide corrections if needed:
-
-Task: %s
-Result: %s
-
-If the result is correct and complete, return it as is.
-If there are issues, suggest improvements or corrections.
-
-Respond only with the corrected result.
-`, task, result)
-
-	// Send correction request to LLM
-	ctx := context.Background()
-	request := llm.ChatRequest{
-		Model:    config.LLMConfig.Model,
-		Messages: []llm.Message{
-			{
-				Role:    "user",
-				Content: correctionPrompt,
-			},
-		},
-		Timeout: config.Timeout,
-	}
-
-	response, err := a.LLMProvider.ChatCompletion(ctx, request)
-	if err != nil {
-		return result, fmt.Errorf("LLM correction failed: %v", err)
-	}
-
-	// Extract the corrected content
-	if len(response.Choices) > 0 {
-		return response.Choices[0].Message.Content, nil
-	}
-
-	return result, nil
+	return safe
 }

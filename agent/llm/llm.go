@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 )
 
@@ -9,6 +10,9 @@ import (
 type LLMProvider interface {
 	// ChatCompletion generates a chat completion response
 	ChatCompletion(ctx context.Context, request ChatRequest) (*ChatResponse, error)
+
+	// ChatCompletionStream streams chat completion responses
+	ChatCompletionStream(ctx context.Context, request ChatRequest, handler func(chunk ChatStreamChunk) error) error
 
 	// Embeddings generates embeddings for text
 	Embeddings(ctx context.Context, request EmbeddingRequest) (*EmbeddingResponse, error)
@@ -24,14 +28,43 @@ type LLMProvider interface {
 type ChatRequest struct {
 	Model    string
 	Messages []Message
+	Tools    []ToolDef
 	Stream   bool
 	Timeout  time.Duration
 }
 
+// ToolDef represents a tool definition for function calling
+type ToolDef struct {
+	Type     string
+	Function FunctionDef
+}
+
+// FunctionDef represents a function definition for tool calling
+type FunctionDef struct {
+	Name        string
+	Description string
+	Parameters  map[string]interface{}
+}
+
 // Message represents a single message in a chat
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role         string
+	Content      string
+	ToolCalls    []ToolCall
+	ToolCallID   string
+}
+
+// ToolCall represents a tool call from the LLM
+type ToolCall struct {
+	ID             string
+	Type           string
+	FunctionCall   FunctionCall
+}
+
+// FunctionCall represents a function call within a tool call
+type FunctionCall struct {
+Name      string
+	Arguments string
 }
 
 // ChatResponse represents a chat completion response
@@ -83,4 +116,44 @@ type LLMConfig struct {
 	Model       string
 	Timeout     time.Duration
 	MaxRetries  int
+}
+
+// AssistantMessage creates an assistant message
+func AssistantMessage(content string) Message {
+	return Message{Role: "assistant", Content: content}
+}
+
+// UserMessage creates a user message
+func UserMessage(content string) Message {
+	return Message{Role: "user", Content: content}
+}
+
+// ToolMessage creates a tool result message
+func ToolMessage(toolCallID, content string) Message {
+	return Message{Role: "tool", Content: content, ToolCallID: toolCallID}
+}
+
+// ToolCallMessage creates an assistant message with tool calls
+func ToolCallMessage(toolCalls []ToolCall) Message {
+	return Message{Role: "assistant", ToolCalls: toolCalls}
+}
+
+// MarshalToolDef converts a ToolDef to JSON-serializable format for the API
+func MarshalToolDef(td ToolDef) (json.RawMessage, error) {
+	params := td.Function.Parameters
+	if params == nil {
+		params = map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
+		}
+	}
+
+	return json.Marshal(map[string]interface{}{
+		"type": "function",
+		"function": map[string]interface{}{
+			"name":        td.Function.Name,
+			"description": td.Function.Description,
+			"parameters":  params,
+		},
+	})
 }

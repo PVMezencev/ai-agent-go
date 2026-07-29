@@ -3,37 +3,45 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/PVMezencev/ai-agent-go/agent/core"
-	"github.com/PVMezencev/ai-agent-go/agent/llm"
-	"github.com/PVMezencev/ai-agent-go/agent/filesystem"
 	"github.com/PVMezencev/ai-agent-go/agent/database"
+	"github.com/PVMezencev/ai-agent-go/agent/filesystem"
+	"github.com/PVMezencev/ai-agent-go/agent/llm"
+	"github.com/PVMezencev/ai-agent-go/agent/tools"
 	"github.com/PVMezencev/ai-agent-go/agent/web"
 )
 
 // Agent represents the main AI agent that coordinates all modules
 type Agent struct {
 	core.Agent
-	core.AgentInterface
 
 	// Module interfaces
-	LLMProvider     llm.LLMProvider
-	FileSystem      filesystem.FileSystemInterface
-	Database        database.DatabaseInterface
-	WebSearch       web.WebSearchInterface
+	LLMProvider    llm.LLMProvider
+	FileSystem     filesystem.FileSystemInterface
+	Database       database.DatabaseInterface
+	WebSearch      web.WebSearchInterface
+
+	// Tool registry
+	ToolRegistry *tools.Registry
 
 	// Configuration
 	config AgentConfig
+
+	// Conversation history
+	conversation []llm.Message
 }
 
 // AgentConfig represents the configuration for the entire agent
 type AgentConfig struct {
 	core.AgentConfig
-	LLMConfig     llm.LLMConfig
+	LLMConfig        llm.LLMConfig
 	FileSystemConfig filesystem.FileSystemConfig
-	DatabaseConfig database.DatabaseConfig
-	WebConfig     web.WebConfig
+	DatabaseConfig   database.DatabaseConfig
+	WebConfig        web.WebConfig
+	MaxToolRounds    int // Max iterations of tool calling before stopping
 }
 
 // NewAgent creates a new AI agent instance
@@ -52,6 +60,13 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 	if err := agent.initModules(); err != nil {
 		return nil, fmt.Errorf("failed to initialize agent modules: %w", err)
 	}
+
+	// Build tool registry from available modules
+	agent.ToolRegistry = tools.BuildAllTools(
+		agent.FileSystem,
+		agent.Database,
+		agent.WebSearch,
+	)
 
 	return agent, nil
 }
@@ -91,7 +106,6 @@ func (a *Agent) initModules() error {
 
 // Start starts the agent and all its modules
 func (a *Agent) Start(ctx context.Context) error {
-	// Start all modules
 	if a.Database != nil {
 		if err := a.Database.Connect(ctx); err != nil {
 			return fmt.Errorf("failed to connect to database: %w", err)
@@ -104,7 +118,6 @@ func (a *Agent) Start(ctx context.Context) error {
 
 // Stop stops the agent and all its modules
 func (a *Agent) Stop(ctx context.Context) error {
-	// Stop all modules
 	if a.Database != nil {
 		if err := a.Database.Disconnect(ctx); err != nil {
 			return fmt.Errorf("failed to disconnect from database: %w", err)
@@ -115,15 +128,135 @@ func (a *Agent) Stop(ctx context.Context) error {
 	return nil
 }
 
-// Execute executes a task using the agent's capabilities
+// Execute executes a task using the agent's capabilities and available tools.
+// It sends the task to the LLM with all registered tools, handles tool calls
+// iteratively, and returns the final result.
 func (a *Agent) Execute(ctx context.Context, task string) (string, error) {
-	// In a real implementation, this would:
-	// 1. Parse the task
-	// 2. Use appropriate modules to execute it
-	// 3. Return results
+	if a.LLMProvider == nil {
+		return "", fmt.Errorf("LLM provider is not configured — set OPENAI_API_KEY to enable")
+	}
 
-	// For this example, we'll return a simulated response
-	return fmt.Sprintf("Agent executed task: %s", task), nil
+	// Start a new conversation for this task
+	a.conversation = []llm.Message{
+		llm.UserMessage(task),
+	}
+
+	maxRounds := a.config.MaxToolRounds
+	if maxRounds == 0 {
+		maxRounds = 10
+	}
+
+	for round := 0; round < maxRounds; round++ {
+		a.UpdatedAt = time.Now()
+
+		// Build the request with tools
+		request := llm.ChatRequest{
+			Model:    a.config.LLMConfig.Model,
+			Messages: a.conversation,
+			Tools:    a.ToolRegistry.ToLLMTools(),
+			Timeout:  a.config.Timeout,
+		}
+
+		// Call the LLM
+		response, err := a.LLMProvider.ChatCompletion(ctx, request)
+		if err != nil {
+			return "", fmt.Errorf("LLM call failed: %w", err)
+		}
+
+		if len(response.Choices) == 0 {
+			return "", fmt.Errorf("LLM returned no choices")
+		}
+
+		assistantMsg := response.Choices[0].Message
+		a.conversation = append(a.conversation, assistantMsg)
+
+		// Check if the LLM wants to call tools
+		if len(assistantMsg.ToolCalls) == 0 {
+			// No tool calls — this is the final answer
+			return strings.TrimSpace(assistantMsg.Content), nil
+		}
+
+		// Execute each tool call and add results to conversation
+		for _, tc := range assistantMsg.ToolCalls {
+			result, err := a.ToolRegistry.ExecuteToolCall(ctx, tc)
+			toolMsg := llm.ToolMessage(tc.ID, tools.ToolResult(result, err))
+			a.conversation = append(a.conversation, toolMsg)
+		}
+	}
+
+	// If we exhaust all rounds, return the last assistant message
+	if len(a.conversation) > 0 {
+		last := a.conversation[len(a.conversation)-1]
+		if last.Content != "" {
+			return strings.TrimSpace(last.Content), nil
+		}
+	}
+
+	return "", fmt.Errorf("agent exceeded maximum tool rounds (%d) without producing a final answer", maxRounds)
+}
+
+// ExecuteStream streams the execution result to the provided handler.
+// It runs the same orchestration loop as Execute, but the final LLM response
+// is streamed chunk by chunk to the handler function.
+func (a *Agent) ExecuteStream(ctx context.Context, task string, handler func(chunk llm.ChatStreamChunk) error) error {
+	if a.LLMProvider == nil {
+		return fmt.Errorf("LLM provider is not configured — set OPENAI_API_KEY to enable")
+	}
+
+	// Start a new conversation for this task
+	a.conversation = []llm.Message{
+		llm.UserMessage(task),
+	}
+
+	maxRounds := a.config.MaxToolRounds
+	if maxRounds == 0 {
+		maxRounds = 10
+	}
+
+	for round := 0; round < maxRounds; round++ {
+		a.UpdatedAt = time.Now()
+
+		// Build the request with tools
+		request := llm.ChatRequest{
+			Model:    a.config.LLMConfig.Model,
+			Messages: a.conversation,
+			Tools:    a.ToolRegistry.ToLLMTools(),
+			Timeout:  a.config.Timeout,
+		}
+
+		// Call the LLM (non-streaming for tool-calling rounds)
+		response, err := a.LLMProvider.ChatCompletion(ctx, request)
+		if err != nil {
+			return fmt.Errorf("LLM call failed: %w", err)
+		}
+
+		if len(response.Choices) == 0 {
+			return fmt.Errorf("LLM returned no choices")
+		}
+
+		assistantMsg := response.Choices[0].Message
+		a.conversation = append(a.conversation, assistantMsg)
+
+		// If no tool calls, this is the final answer — stream it
+		if len(assistantMsg.ToolCalls) == 0 {
+			// For the final round, re-stream without tools to get streaming output
+			finalRequest := llm.ChatRequest{
+				Model:    a.config.LLMConfig.Model,
+				Messages: a.conversation,
+				Timeout:  a.config.Timeout,
+			}
+			return a.LLMProvider.ChatCompletionStream(ctx, finalRequest, handler)
+		}
+
+		// Execute each tool call and add results to conversation
+		for _, tc := range assistantMsg.ToolCalls {
+			result, execErr := a.ToolRegistry.ExecuteToolCall(ctx, tc)
+			toolMsg := llm.ToolMessage(tc.ID, tools.ToolResult(result, execErr))
+			a.conversation = append(a.conversation, toolMsg)
+		}
+	}
+
+	return fmt.Errorf("agent exceeded maximum tool rounds (%d)", maxRounds)
 }
 
 // GetConfig returns the agent configuration
@@ -146,7 +279,10 @@ func (a *Agent) GetStatus() core.AgentStatus {
 		Stats:      make(map[string]interface{}),
 	}
 
-	// Add module-specific stats
+	status.Stats["llm_configured"] = a.LLMProvider != nil
+	status.Stats["tools_count"] = len(a.ToolRegistry.All())
+	status.Stats["conversation_length"] = len(a.conversation)
+
 	if a.Database != nil {
 		status.Stats["database_connected"] = a.Database.IsConnected()
 	}
@@ -169,6 +305,9 @@ func (a *Agent) GetModules() []string {
 	}
 	if a.WebSearch != nil {
 		modules = append(modules, "web")
+	}
+	if a.ToolRegistry != nil && len(a.ToolRegistry.All()) > 0 {
+		modules = append(modules, "tools")
 	}
 
 	return modules
