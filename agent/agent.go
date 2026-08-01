@@ -114,7 +114,9 @@ func (a *Agent) Start(ctx context.Context) error {
 		}
 	}
 
+	a.mu.Lock()
 	a.UpdatedAt = time.Now()
+	a.mu.Unlock()
 	return nil
 }
 
@@ -126,7 +128,9 @@ func (a *Agent) Stop(ctx context.Context) error {
 		}
 	}
 
+	a.mu.Lock()
 	a.UpdatedAt = time.Now()
+	a.mu.Unlock()
 	return nil
 }
 
@@ -146,7 +150,9 @@ func (a *Agent) Execute(ctx context.Context, task string) (string, error) {
 	}
 
 	for round := 0; round < maxRounds; round++ {
+		a.mu.Lock()
 		a.UpdatedAt = time.Now()
+		a.mu.Unlock()
 
 		// Build the request with tools
 		request := llm.ChatRequest{
@@ -203,7 +209,9 @@ func (a *Agent) ExecuteStream(ctx context.Context, task string, handler func(chu
 	}
 
 	for round := 0; round < maxRounds; round++ {
+		a.mu.Lock()
 		a.UpdatedAt = time.Now()
+		a.mu.Unlock()
 
 		// Build the request with tools
 		request := llm.ChatRequest{
@@ -314,15 +322,21 @@ func (a *Agent) GetConfig() core.AgentConfig {
 // SetConfig sets the agent configuration
 func (a *Agent) SetConfig(config core.AgentConfig) error {
 	a.config.AgentConfig = config
+	a.mu.Lock()
 	a.UpdatedAt = time.Now()
+	a.mu.Unlock()
 	return nil
 }
 
 // GetStatus returns the agent status
 func (a *Agent) GetStatus() core.AgentStatus {
+	a.mu.Lock()
+	lastActive := a.UpdatedAt
+	a.mu.Unlock()
+
 	status := core.AgentStatus{
 		IsRunning:  true,
-		LastActive: a.UpdatedAt,
+		LastActive: lastActive,
 		Stats:      make(map[string]interface{}),
 	}
 
