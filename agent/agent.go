@@ -76,7 +76,7 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 // initModules initializes all the agent modules
 func (a *Agent) initModules() error {
 	// Initialize LLM provider
-	if a.config.LLMConfig.APIKey != "" {
+	if a.config.LLMConfig.APIKey != "" || a.config.LLMConfig.APIEndpoint != "" {
 		provider, err := llm.NewOpenAIProvider(a.config.LLMConfig)
 		if err != nil {
 			return fmt.Errorf("failed to create LLM provider: %w", err)

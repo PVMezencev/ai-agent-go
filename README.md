@@ -62,13 +62,32 @@ ai-agent "Прочитай файл go.mod и объясни зависимос�
 ai-agent "Поискай в интернете последнюю версию Go"
 ```
 
+### Локальные модели (Ollama, vLLM, LM Studio)
+
+Агент поддерживает любые LLM-сервисы с OpenAI-совместимым HTTP API. Укажите кастомный эндпоинт и запустите без `OPENAI_API_KEY`:
+
+```bash
+# Ollama (по умолчанию на http://127.0.0.1:11434)
+export OPENAI_API_KEY=""
+export OPENAI_ENDPOINT="http://localhost:11435/v1"
+export OPENAI_MODEL="llama3"
+
+ai-agent "Расскажи о goroutines"
+
+# LM Studio / vLLM / любой OpenAI-совместимый сервер
+export OPENAI_ENDPOINT="http://localhost:8855/v1"
+ai-agent "Свертай SELECT на Go"
+```
+
+**Важно:** при использовании кастомного эндпоинта `OPENAI_API_KEY` может быть пустым — агент передаст запрос без `Authorization` заголовка.
+
 ### Переменные окружения
 
 | Переменная | Описание | По умолчанию |
 |------------|----------|-------------|
 | `OPENAI_API_KEY` | API-ключ OpenAI (обязательно) | — |
 | `OPENAI_MODEL` | Модель для использования | `gpt-4o` |
-| `OPENAI_ENDPOINT` | Кастомный API-эндпоинт | `https://api.openai.com` |
+| `OPENAI_ENDPOINT` | Кастумный API-эндпоинт (Ollama, vLLM, LM Studio и любые совместимые с OpenAI API) | `https://api.openai.com` |
 
 ### Как библиотека
 

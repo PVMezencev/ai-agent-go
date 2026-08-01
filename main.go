@@ -104,6 +104,13 @@ func createDefaultConfig() CLIConfig {
 				MaxRetries:  3,
 				Timeout:     120 * time.Second,
 			},
+			LLMConfig: llm.LLMConfig{
+				APIKey:     os.Getenv("OPENAI_API_KEY"),
+				APIEndpoint: os.Getenv("OPENAI_ENDPOINT"),
+				Model:      model,
+				Timeout:    120 * time.Second,
+				MaxRetries: 3,
+			},
 			MaxToolRounds: 10,
 		},
 		LLMConfig: llm.LLMConfig{

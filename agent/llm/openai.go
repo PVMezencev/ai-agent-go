@@ -21,8 +21,8 @@ type OpenAIProvider struct {
 
 // NewOpenAIProvider creates a new OpenAI provider instance
 func NewOpenAIProvider(config LLMConfig) (*OpenAIProvider, error) {
-	if config.APIKey == "" {
-		return nil, fmt.Errorf("OpenAI API key is required")
+	if config.APIKey == "" && config.APIEndpoint == "" {
+		return nil, fmt.Errorf("either APIKey or APIEndpoint must be set")
 	}
 	if config.Timeout == 0 {
 		config.Timeout = 60 * time.Second
@@ -136,7 +136,9 @@ func (p *OpenAIProvider) Embeddings(ctx context.Context, request EmbeddingReques
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+p.config.APIKey)
+	if p.config.APIKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+p.config.APIKey)
+	}
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
@@ -146,7 +148,7 @@ func (p *OpenAIProvider) Embeddings(ctx context.Context, request EmbeddingReques
 
 	if resp.StatusCode != http.StatusOK {
 		errBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("OpenAI embeddings API error (status %d): %s", resp.StatusCode, string(errBody))
+		return nil, fmt.Errorf("LLM API error (status %d): %s", resp.StatusCode, string(errBody))
 	}
 
 	var result openaiEmbeddingResponse
@@ -257,7 +259,9 @@ func (p *OpenAIProvider) doChatRequest(ctx context.Context, request ChatRequest)
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+p.config.APIKey)
+	if p.config.APIKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+p.config.APIKey)
+	}
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
@@ -345,7 +349,9 @@ func (p *OpenAIProvider) doStreamRequest(ctx context.Context, request ChatReques
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+p.config.APIKey)
+	if p.config.APIKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+p.config.APIKey)
+	}
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
