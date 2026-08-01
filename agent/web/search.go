@@ -2,142 +2,88 @@ package web
 
 import (
 	"context"
-	"fmt"
-	"net/http"
 	"time"
 )
 
-// WebSearch implements the WebSearchInterface for web operations
-type WebSearch struct {
-	config WebConfig
-	client *http.Client
+// WebSearchInterface defines the interface for web search operations
+type WebSearchInterface interface {
+	// Search operations
+	Search(ctx context.Context, query string, options SearchOptions) (*SearchResults, error)
+	SearchWithBrowser(ctx context.Context, query string, options SearchOptions) (*SearchResults, error)
+
+	// Scraping operations
+	Scrape(ctx context.Context, url string, options ScrapeOptions) (*ScrapeResult, error)
+
+	// Configuration
+	GetConfig() WebConfig
+	SetConfig(config WebConfig) error
+
+	// Proxy operations
+	SetProxy(proxy string) error
 }
 
-// NewWebSearch creates a new web search instance
-func NewWebSearch(config WebConfig) (*WebSearch, error) {
-	// Create HTTP client with timeout and custom configuration
-	client := &http.Client{
-		Timeout: config.Timeout,
-	}
-
-	return &WebSearch{
-		config: config,
-		client: client,
-	}, nil
+// SearchOptions represents search options
+type SearchOptions struct {
+	MaxResults    int
+	Timeout       time.Duration
+	Language      string
+	Region        string
+	UserAgent     string
+	Headers       map[string]string
+	AllowBlocked  bool
 }
 
-// Search performs a web search
-func (ws *WebSearch) Search(ctx context.Context, query string, options SearchOptions) (*SearchResults, error) {
-	// In a real implementation, this would make an HTTP request to a search engine API
-	// For this example, we'll simulate results
-	time.Sleep(100 * time.Millisecond) // Simulate network delay
-
-	// Use default options if not provided
-	if options.Timeout == 0 {
-		options.Timeout = ws.config.Timeout
-	}
-	if options.MaxResults == 0 {
-		options.MaxResults = 10
-	}
-
-	// Simulate search results
-	results := make([]SearchResult, 0, options.MaxResults)
-	for i := 0; i < options.MaxResults; i++ {
-		results = append(results, SearchResult{
-			Title:       fmt.Sprintf("Search Result %d for: %s", i+1, query),
-			URL:         fmt.Sprintf("https://example.com/result-%d", i+1),
-			Description: fmt.Sprintf("This is the description for search result %d", i+1),
-			Snippet:     fmt.Sprintf("This is a snippet showing relevant content from result %d", i+1),
-			Source:      "example.com",
-			LastUpdated: time.Now().Add(-time.Duration(i) * 24 * time.Hour),
-		})
-	}
-
-	return &SearchResults{
-		Query:     query,
-		Results:   results,
-		Total:     options.MaxResults,
-		Processed: time.Now(),
-	}, nil
+// SearchResults represents search results
+type SearchResults struct {
+	Query     string
+	Results   []SearchResult
+	Total     int
+	NextPage  string
+	Processed time.Time
 }
 
-// SearchWithBrowser performs a web search using browser automation
-func (ws *WebSearch) SearchWithBrowser(ctx context.Context, query string, options SearchOptions) (*SearchResults, error) {
-	// In a real implementation, this would use a headless browser like Puppeteer
-	// For this example, we'll use the regular search method with browser-specific headers
-	if options.UserAgent == "" {
-		options.UserAgent = ws.config.UserAgent
-	}
-
-	// Add browser-specific headers
-	if options.Headers == nil {
-		options.Headers = make(map[string]string)
-	}
-	options.Headers["User-Agent"] = options.UserAgent
-	options.Headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
-	options.Headers["Accept-Language"] = "en-US,en;q=0.5"
-	options.Headers["Accept-Encoding"] = "gzip, deflate"
-	options.Headers["Connection"] = "keep-alive"
-	options.Headers["Upgrade-Insecure-Requests"] = "1"
-
-	// Simulate browser search
-	return ws.Search(ctx, query, options)
+// SearchResult represents a single search result
+type SearchResult struct {
+	Title       string
+	URL         string
+	Description string
+	Snippet     string
+	Source      string
+	Thumbnail   string
+	LastUpdated time.Time
 }
 
-// Scrape scrapes a web page
-func (ws *WebSearch) Scrape(ctx context.Context, url string, options ScrapeOptions) (*ScrapeResult, error) {
-	// In a real implementation, this would make an HTTP request to the URL and parse the content
-	// For this example, we'll simulate scraping
-
-	// Use default options if not provided
-	if options.Timeout == 0 {
-		options.Timeout = ws.config.Timeout
-	}
-
-	// Create a context with timeout
-	ctx, cancel := context.WithTimeout(ctx, options.Timeout)
-	defer cancel()
-
-	// In a real implementation, we would:
-	// 1. Make HTTP request to URL
-	// 2. Parse HTML content
-	// 3. Extract relevant information
-	// 4. Return structured data
-
-	// Simulate scraping response
-	result := &ScrapeResult{
-		URL:         url,
-		Title:       fmt.Sprintf("Scraped Title for %s", url),
-		Content:     fmt.Sprintf("This is the scraped content from %s", url),
-		HTML:        fmt.Sprintf("<html><body><h1>Scraped Content</h1><p>Content from %s</p></body></html>", url),
-		Links:       []string{url, "https://example.com/related"},
-		Images:      []string{"https://example.com/image1.jpg"},
-		Meta:        map[string]string{"source": url, "scraped": time.Now().Format(time.RFC3339)},
-		Processed:   time.Now(),
-		StatusCode:  200,
-	}
-
-	return result, nil
+// ScrapeOptions represents scraping options
+type ScrapeOptions struct {
+	Timeout     time.Duration
+	UserAgent   string
+	Headers     map[string]string
+	WaitFor     string
+	JavaScript  bool
+	Images      bool
+	Scripts     bool
 }
 
-// GetConfig returns the web configuration
-func (ws *WebSearch) GetConfig() WebConfig {
-	return ws.config
+// ScrapeResult represents scraping results
+type ScrapeResult struct {
+	URL         string
+	Title       string
+	Content     string
+	HTML        string
+	Links       []string
+	Images      []string
+	Meta        map[string]string
+	Processed   time.Time
+	StatusCode  int
 }
 
-// SetConfig sets the web configuration
-func (ws *WebSearch) SetConfig(config WebConfig) error {
-	ws.config = config
-	return nil
-}
-
-// SetProxy sets the proxy for web operations
-func (ws *WebSearch) SetProxy(proxy string) error {
-	// In a real implementation, this would set up the HTTP client with proxy
-	// For this example, we'll just store it
-	if proxy != "" {
-		// Simulate proxy setting
-		fmt.Printf("Proxy set to: %s\n", proxy)
-	}
-	return nil
+// WebConfig represents the configuration for web operations
+type WebConfig struct {
+	Timeout      time.Duration
+	MaxRetries   int
+	UserAgent    string
+	Proxy        string
+	Headers      map[string]string
+	AllowBlocked bool
+	RateLimit    int
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/PVMezencev/ai-agent-go/agent/core"
@@ -30,7 +31,8 @@ type Agent struct {
 	// Configuration
 	config AgentConfig
 
-	// Conversation history
+	// Conversation history (protected by mutex for concurrency safety)
+	mu         sync.Mutex
 	conversation []llm.Message
 }
 
@@ -136,10 +138,7 @@ func (a *Agent) Execute(ctx context.Context, task string) (string, error) {
 		return "", fmt.Errorf("LLM provider is not configured — set OPENAI_API_KEY to enable")
 	}
 
-	// Start a new conversation for this task
-	a.conversation = []llm.Message{
-		llm.UserMessage(task),
-	}
+	a.setConversation(llm.UserMessage(task))
 
 	maxRounds := a.config.MaxToolRounds
 	if maxRounds == 0 {
@@ -152,7 +151,7 @@ func (a *Agent) Execute(ctx context.Context, task string) (string, error) {
 		// Build the request with tools
 		request := llm.ChatRequest{
 			Model:    a.config.LLMConfig.Model,
-			Messages: a.conversation,
+			Messages: a.getConversation(),
 			Tools:    a.ToolRegistry.ToLLMTools(),
 			Timeout:  a.config.Timeout,
 		}
@@ -168,7 +167,7 @@ func (a *Agent) Execute(ctx context.Context, task string) (string, error) {
 		}
 
 		assistantMsg := response.Choices[0].Message
-		a.conversation = append(a.conversation, assistantMsg)
+		a.appendConversation(assistantMsg)
 
 		// Check if the LLM wants to call tools
 		if len(assistantMsg.ToolCalls) == 0 {
@@ -180,33 +179,23 @@ func (a *Agent) Execute(ctx context.Context, task string) (string, error) {
 		for _, tc := range assistantMsg.ToolCalls {
 			result, err := a.ToolRegistry.ExecuteToolCall(ctx, tc)
 			toolMsg := llm.ToolMessage(tc.ID, tools.ToolResult(result, err))
-			a.conversation = append(a.conversation, toolMsg)
+			a.appendConversation(toolMsg)
 		}
 	}
 
-	// If we exhaust all rounds, return the last assistant message
-	if len(a.conversation) > 0 {
-		last := a.conversation[len(a.conversation)-1]
-		if last.Content != "" {
-			return strings.TrimSpace(last.Content), nil
-		}
-	}
-
+	// If we exhaust all rounds, return an error
 	return "", fmt.Errorf("agent exceeded maximum tool rounds (%d) without producing a final answer", maxRounds)
 }
 
 // ExecuteStream streams the execution result to the provided handler.
 // It runs the same orchestration loop as Execute, but the final LLM response
-// is streamed chunk by chunk to the handler function.
+// is streamed chunk by chunk to the handler function — without a second API call.
 func (a *Agent) ExecuteStream(ctx context.Context, task string, handler func(chunk llm.ChatStreamChunk) error) error {
 	if a.LLMProvider == nil {
 		return fmt.Errorf("LLM provider is not configured — set OPENAI_API_KEY to enable")
 	}
 
-	// Start a new conversation for this task
-	a.conversation = []llm.Message{
-		llm.UserMessage(task),
-	}
+	a.setConversation(llm.UserMessage(task))
 
 	maxRounds := a.config.MaxToolRounds
 	if maxRounds == 0 {
@@ -219,7 +208,7 @@ func (a *Agent) ExecuteStream(ctx context.Context, task string, handler func(chu
 		// Build the request with tools
 		request := llm.ChatRequest{
 			Model:    a.config.LLMConfig.Model,
-			Messages: a.conversation,
+			Messages: a.getConversation(),
 			Tools:    a.ToolRegistry.ToLLMTools(),
 			Timeout:  a.config.Timeout,
 		}
@@ -235,28 +224,86 @@ func (a *Agent) ExecuteStream(ctx context.Context, task string, handler func(chu
 		}
 
 		assistantMsg := response.Choices[0].Message
-		a.conversation = append(a.conversation, assistantMsg)
+		a.appendConversation(assistantMsg)
 
-		// If no tool calls, this is the final answer — stream it
+		// If no tool calls, this is the final answer — stream it using the same request
 		if len(assistantMsg.ToolCalls) == 0 {
-			// For the final round, re-stream without tools to get streaming output
-			finalRequest := llm.ChatRequest{
-				Model:    a.config.LLMConfig.Model,
-				Messages: a.conversation,
-				Timeout:  a.config.Timeout,
-			}
-			return a.LLMProvider.ChatCompletionStream(ctx, finalRequest, handler)
+			return a.streamContent(ctx, assistantMsg.Content, handler)
 		}
 
 		// Execute each tool call and add results to conversation
 		for _, tc := range assistantMsg.ToolCalls {
 			result, execErr := a.ToolRegistry.ExecuteToolCall(ctx, tc)
 			toolMsg := llm.ToolMessage(tc.ID, tools.ToolResult(result, execErr))
-			a.conversation = append(a.conversation, toolMsg)
+			a.appendConversation(toolMsg)
 		}
 	}
 
 	return fmt.Errorf("agent exceeded maximum tool rounds (%d)", maxRounds)
+}
+
+// streamContent streams the given text content chunk by chunk.
+// It splits on word boundaries to produce natural-looking chunks.
+func (a *Agent) streamContent(ctx context.Context, content string, handler func(chunk llm.ChatStreamChunk) error) error {
+	if content == "" {
+		return nil
+	}
+
+	// Send in ~50-char chunks to simulate streaming
+	const chunkSize = 50
+	runes := []rune(content)
+	i := 0
+	for i < len(runes) {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		end := i + chunkSize
+		if end >= len(runes) {
+			end = len(runes)
+		} else {
+			// Try to break on word boundary
+			for j := end; j < len(runes); j++ {
+				if runes[j] == ' ' || runes[j] == '\n' {
+					end = j
+					break
+				}
+			}
+		}
+
+		chunk := string(runes[i:end])
+		if err := handler(llm.ChatStreamChunk{Content: chunk}); err != nil {
+			return err
+		}
+		i = end
+	}
+
+	return nil
+}
+
+// getConversation returns a copy of the conversation (thread-safe).
+func (a *Agent) getConversation() []llm.Message {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	result := make([]llm.Message, len(a.conversation))
+	copy(result, a.conversation)
+	return result
+}
+
+// setConversation replaces the entire conversation (thread-safe).
+func (a *Agent) setConversation(msg llm.Message) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.conversation = []llm.Message{msg}
+}
+
+// appendConversation appends a message to the conversation (thread-safe).
+func (a *Agent) appendConversation(msg llm.Message) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.conversation = append(a.conversation, msg)
 }
 
 // GetConfig returns the agent configuration
@@ -281,7 +328,7 @@ func (a *Agent) GetStatus() core.AgentStatus {
 
 	status.Stats["llm_configured"] = a.LLMProvider != nil
 	status.Stats["tools_count"] = len(a.ToolRegistry.All())
-	status.Stats["conversation_length"] = len(a.conversation)
+	status.Stats["conversation_length"] = a.conversationLength()
 
 	if a.Database != nil {
 		status.Stats["database_connected"] = a.Database.IsConnected()
@@ -311,4 +358,11 @@ func (a *Agent) GetModules() []string {
 	}
 
 	return modules
+}
+
+// conversationLength returns the length of the conversation (thread-safe).
+func (a *Agent) conversationLength() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return len(a.conversation)
 }

@@ -5,13 +5,17 @@
 ## Архитектура
 
 ```
-agent/
-├── core/          # Базовая структура агента, интерфейсы, конфиги
-├── llm/           # LLM-провайдеры (OpenAI) с HTTP, streaming и tool calling
-├── filesystem/    # Работа с файловой системой (чтение, запись, список)
-├── database/      # SQLite-база данных (запросы, транзакции)
-├── web/           # Веб-поиск и скрапинг страниц
-└── tools/         # Система инструментов — мост между модулями и LLM
+ai-agent-go/
+├── main.go                  # CLI-входная точка
+├── agent/
+│   ├── agent.go             # Оркестратор: Execute / ExecuteStream
+│   ├── core/                # Базовая структура агента, интерфейсы, конфиги
+│   ├── llm/                 # LLM-провайдеры (OpenAI) с HTTP, streaming и tool calling
+│   │   ├── mock.go          # MockLLMProvider для тестов
+│   ├── filesystem/          # Работа с файловой системой (чтение, запись, список)
+│   ├── database/            # SQLite-база данных (запросы, транзакции)
+│   ├── web/                 # Веб-поиск (DuckDuckGo) и скрапинг (goquery)
+│   └── tools/               # Система инструментов — мост между модулями и LLM
 ```
 
 ### Пакеты
@@ -19,26 +23,29 @@ agent/
 | Пакет | Описание |
 |-------|----------|
 | `core` | Базовая структура `Agent`, `AgentInterface`, `AgentConfig`, `AgentStatus` |
-| `llm` | Интерфейс `LLMProvider`, реализация `OpenAIProvider` с реальным HTTP, streaming (SSE) и function calling |
+| `llm` | Интерфейс `LLMProvider`, реализация `OpenAIProvider` с реальным HTTP, streaming (SSE) и function calling; `MockLLMProvider` для тестов |
 | `filesystem` | Интерфейс `FileSystemInterface`, реализация `LocalFileSystem` с защитой от выхода за `BasePath` |
 | `database` | Интерфейс `DatabaseInterface`, реализация `SQLiteDB` с пулом соединений и транзакциями |
-| `web` | Интерфейс `WebSearchInterface`, реализация `WebSearch` для поиска и скрапинга |
+| `web` | Интерфейс `WebSearchInterface`, реализация `WebSearch` — реальный поиск через DuckDuckGo API и HTML-парсинг через goquery |
 | `tools` | Система инструментов: `Tool`, `Registry`, `ToolFunc` и билдеры для каждого модуля |
 
 ## Возможности
 
-1. **Реальная интеграция с OpenAI** — HTTP-запросы к API с ретриями (5xx, 429) и экспоненциальной задержкой
+1. **Реальная интеграция с OpenAI** — HTTP-запросы к API с ретриами (5xx, 429) и экспоненциальной задержкой
 2. **Tool Calling (Function Calling)** — LLM решает, какие инструменты вызвать; агент выполняет и возвращает результаты в цикл
-3. **Streaming** — SSE-потоковый вывод ответов в CLI для мгновенной обратной связи
-4. **Безопасность** — деструктивные операции (`delete_file`, `exec_sql`, `write_file`) требуют подтверждения пользователя
-5. **Модульная архитектура** — каждый компонент закреплён на интерфейсе, легко мокать и заменять
-6. **Расширяемость** — добавление нового инструмента — одна функция через `tools.NewToolFunc`
+3. **Streaming** — SSE-потоковый вывод ответов в CLI для мгновенной обратной связи (без дублирующего API-вызова)
+4. **Безопасность** — деструктивные операции (`delete_file`, `exec_sql`, `write_file`) требуют подтверждения пользователя; `basePath`-песочница для файловой системы
+5. **Потокобезопасность** — `sync.Mutex` защищает историю разговора (`conversation`) при конкурентном использовании
+6. **Модульная архитектура** — каждый компонент завязан на интерфейс, легко мокать и заменять
+7. **Расширяемость** — добавление нового инструмента — одна функция через `tools.NewToolFunc`
 
 ## Установка
 
 ```bash
 go install github.com/PVMezencev/ai-agent-go@latest
 ```
+
+**Требования:** Go 1.25+
 
 ## Быстрый старт
 
@@ -128,13 +135,13 @@ func main() {
 
     // Execute — отправляет задачу в LLM с tools,
     // обрабатывает tool calls и возвращает финальный ответ
-    result, err := a.Execute(ctx, "Найди информацию о Go 1.24 и сохрани в файл news.md")
+    result, err := a.Execute(ctx, "Найди информацию о Go 1.25 и сохрани в файл news.md")
     if err != nil {
         log.Fatal(err)
     }
     fmt.Println(result)
 
-    // Streaming — вывод ответа по мере генерации
+    // Streaming — вывод ответа по мере генерации (без дублирующего API-вызова)
     err = a.ExecuteStream(ctx, "Расскажи о паттернах concurrency в Go", func(chunk llm.ChatStreamChunk) error {
         fmt.Print(chunk.Content)
         return nil
@@ -158,8 +165,8 @@ func main() {
 | `create_directory` | filesystem | Создание директории | — |
 | `query_sql` | database | Выполнение SELECT-запросов | — |
 | `exec_sql` | database | Выполнение SQL-операций (INSERT/UPDATE/DELETE) | Требует подтверждения |
-| `web_search` | web | Поиск в интернете | — |
-| `scrape_url` | web | Скрапинг веб-страницы | — |
+| `web_search` | web | Поиск в интернете (DuckDuckGo) | — |
+| `scrape_url` | web | Скрапинг веб-страницы (goquery) | — |
 
 ## Как работает оркестрация
 
@@ -186,6 +193,28 @@ func main() {
 ```
 
 Цикл повторяется до `MaxToolRounds` (по умолчанию 10) или пока LLM не вернёт текстовый ответ без tool calls.
+
+### Streaming без дублирующего запроса
+
+`ExecuteStream` использует тот же ответ LLM из основного цикла — финальный ответ стримится из уже полученного контента через `streamContent()`, а не делает отдельный API-вызов.
+
+## Тестирование
+
+```bash
+go test ./...
+```
+
+```bash
+go test ./... -race    # проверка на data race
+```
+
+Включены тесты оркестрации с моком `MockLLMProvider`:
+- `Execute` — прямой ответ, tool call → ответ, исчерпание раундов, ошибки
+- `ExecuteStream` — стриминг ответа, tool call → стриминг
+- Потокобезопасность (`ConversationIsThreadSafe`)
+- Интеграционный тест реального веб-поиска (`TestWebSearch_RealSearch`)
+
+Все интерфейсы спроектированы для простого мокирования.
 
 ## Добавление нового инструмента
 
@@ -215,14 +244,6 @@ registry.Register(tools.NewToolFunc(
     },
 ))
 ```
-
-## Тестирование
-
-```bash
-go test ./...
-```
-
-Все интерфейсы спроектированы для простого мокирования. Модули можно заменить на тестовые реализации без подключения к внешним сервисам.
 
 ## Лицензия
 
